@@ -1,9 +1,9 @@
 :root{
   --void:#0A0D10; --panel:#12171B; --panel-2:#161C21;
-  --line:#232B31; --line-soft:#1B2126;
-  --amber:#F0A830; --amber-dim:#6B5327; --cyan:#4FD4D8;
+  --line:#2A333A; --line-soft:#212A30;
+  --amber:#F0A830; --amber-dim:#8A6B34; --cyan:#5FDEE2;
   --green:#4ADE80; --red:#EF5350;
-  --text:#E7EDF1; --text-muted:#7E8C93; --text-faint:#4C575D;
+  --text:#F3F6F8; --text-muted:#B9C4CA; --text-faint:#8C979D;
   --mono:'JetBrains Mono',monospace; --sans:'IBM Plex Sans',sans-serif; --cond:'IBM Plex Sans Condensed',sans-serif;
 }
 *{box-sizing:border-box;}
