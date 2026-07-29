@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import * as Icons from 'lucide-react';
 import { CATEGORIES } from '../../lib/categories';
 import { EQUIP } from '../../lib/equipment';
@@ -16,9 +17,9 @@ export default function DashboardSidebar() {
       </div>
 
       <div>
-        <div className="e-navlink active">
+        <Link href="/dashboard" className="e-navlink active">
           <Icons.LayoutDashboard size={16} /> Dashboard
-        </div>
+        </Link>
       </div>
 
       <div>
@@ -26,9 +27,9 @@ export default function DashboardSidebar() {
         {CATEGORIES.map(cat => {
           const Icon = Icons[cat.icon] || Icons.Folder;
           return (
-            <a href={`/dashboard#${cat.key}`} className="e-navlink" key={cat.key}>
+            <Link href={`/kategori/${cat.key}`} className="e-navlink" key={cat.key}>
               <Icon size={16} /> {cat.label}
-            </a>
+            </Link>
           );
         })}
       </div>

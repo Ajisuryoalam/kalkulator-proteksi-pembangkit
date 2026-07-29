@@ -26,7 +26,6 @@ export default function CategoryGrid() {
           const Icon = Icons[cat.icon] || Icons.Folder;
           const c = COLOR_MAP[cat.color];
           const hasCalc = cat.equipKeys.length > 0;
-          const firstKey = cat.equipKeys[0];
           const inner = (
             <>
               <div className="e-cat-icon" style={{ background: c.bg }}>
@@ -47,7 +46,7 @@ export default function CategoryGrid() {
             </>
           );
           return hasCalc ? (
-            <Link href={`/kalkulator/${firstKey}`} className="e-cat-card" style={{ '--e-cat-accent': c.fg }} key={cat.key} id={cat.key}>
+            <Link href={`/kategori/${cat.key}`} className="e-cat-card" style={{ '--e-cat-accent': c.fg }} key={cat.key} id={cat.key}>
               {inner}
             </Link>
           ) : (
