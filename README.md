@@ -11,6 +11,16 @@ npm run dev
 
 Buka http://localhost:3000
 
+## Menyambungkan Supabase (opsional, untuk auth + riwayat/favorit)
+
+1. Salin `.env.local.example` menjadi `.env.local`
+2. Isi `NEXT_PUBLIC_SUPABASE_URL` dan `NEXT_PUBLIC_SUPABASE_ANON_KEY` dari Supabase Dashboard → Settings → API
+   - **Jangan pernah isi `service_role` key di sini atau di mana pun yang ikut ke GitHub**
+3. Buka Supabase Dashboard → SQL Editor → New query, tempel isi file `supabase/schema.sql`, lalu Run — ini membuat tabel `profiles`, `calculation_history`, dan `favorites` beserta aturan keamanannya (Row Level Security)
+4. Di Vercel, tambahkan kedua env var yang sama di Project Settings → Environment Variables, lalu redeploy
+
+Catatan: di versi ini, dashboard sudah siap menampilkan statistik/riwayat/favorit, tapi kalkulator individual belum "mencatat" hasil hitungannya ke Supabase — itu tahap berikutnya.
+
 ## Deploy ke Vercel (gratis)
 
 1. **Push ke GitHub**
