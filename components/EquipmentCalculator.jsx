@@ -1,8 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ResultsPanel from './ResultsPanel';
 import { TCCChart, DiffChart } from './Charts';
 import { EQUIP } from '../lib/equipment';
+import { useAuth } from './AuthProvider';
+import { logCalculation, fetchFavorites, toggleFavorite } from '../lib/history';
+import { Star } from 'lucide-react';
 
 function defaultValues(fields) {
   const v = {};
@@ -13,10 +16,21 @@ function defaultValues(fields) {
   return v;
 }
 
+function buildSummary(fields, values) {
+  return fields.slice(0, 2).map(f => `${f.label.split('—')[0].trim()}=${values[f.id]}${f.unit ? f.unit : ''}`).join(', ');
+}
+
 export default function EquipmentCalculator({ equipKey }) {
   const equip = EQUIP[equipKey];
+  const { user } = useAuth();
   const [values, setValues] = useState(() => defaultValues(equip.fields));
   const [output, setOutput] = useState(null);
+  const [isFav, setIsFav] = useState(false);
+
+  useEffect(() => {
+    if (!user) { setIsFav(false); return; }
+    fetchFavorites(user.id).then(list => setIsFav(list.some(f => f.equip_key === equipKey)));
+  }, [user, equipKey]);
 
   function setField(id, raw, isNumber) {
     setValues(prev => ({ ...prev, [id]: isNumber ? parseFloat(raw) : raw }));
@@ -25,6 +39,17 @@ export default function EquipmentCalculator({ equipKey }) {
   function handleCalc() {
     const out = equip.calc(values);
     setOutput(out);
+    if (user) {
+      logCalculation(user.id, {
+        equipKey, equipLabel: equip.title, summary: buildSummary(equip.fields, values), inputSnapshot: values,
+      });
+    }
+  }
+
+  async function handleToggleFav() {
+    if (!user) return;
+    await toggleFavorite(user.id, equipKey, isFav);
+    setIsFav(!isFav);
   }
 
   const groups = output ? (Array.isArray(output) ? output : output.groups) : null;
@@ -34,7 +59,15 @@ export default function EquipmentCalculator({ equipKey }) {
   return (
     <div>
       <div className="card">
-        <h2>{equip.title}</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <h2>{equip.title}</h2>
+          {user && (
+            <button onClick={handleToggleFav} title={isFav ? 'Hapus dari favorit' : 'Tandai favorit'}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              <Star size={20} color={isFav ? '#F0A830' : '#4C575D'} fill={isFav ? '#F0A830' : 'none'} />
+            </button>
+          )}
+        </div>
         <div className="desc">{equip.desc}</div>
         <div className="grid-inputs">
           {equip.fields.map(f => (
