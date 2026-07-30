@@ -2,6 +2,7 @@ import { EQUIP, ORDER } from '../../../lib/equipment';
 import Sidebar from '../../../components/Sidebar';
 import EquipmentCalculator from '../../../components/EquipmentCalculator';
 import Coordination from '../../../components/Coordination';
+import GarduInduk from '../../../components/GarduInduk';
 import { notFound } from 'next/navigation';
 
 export function generateStaticParams() {
@@ -25,6 +26,8 @@ export default function KalkulatorPage({ params }) {
         <main>
           {params.key === 'koordinasi' ? (
             <Coordination />
+          ) : params.key === 'gardu' ? (
+            <GarduInduk />
           ) : EQUIP[params.key].embedUrl ? (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <iframe
