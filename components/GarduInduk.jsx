@@ -16,7 +16,7 @@ export default function GarduInduk() {
   const [vSistemKv, setVSistemKv] = useState(20);
   const [sTrafoMva, setSTrafoMva] = useState(10);
   const [ngrAda, setNgrAda] = useState('Ada');
-  const [ngrCurrentA, setNgrCurrentA] = useState(40);
+  const [ngrResistanceOhm, setNgrResistanceOhm] = useState(289);
   const [groundEvalManual, setGroundEvalManual] = useState(20);
   const [ifPhaseMaxKa, setIfPhaseMaxKa] = useState(12.5);
   const [pickupNDasar, setPickupNDasar] = useState(10);
@@ -42,8 +42,8 @@ export default function GarduInduk() {
 
   function hitung() {
     const ngrOn = ngrAda === 'Ada';
+    const ngrCurrentA = ngrOn ? (vSistemKv * 1000 / Math.sqrt(3)) / ngrResistanceOhm : null;
     const groundEvalA = ngrOn ? ngrCurrentA : groundEvalManual;
-    const rNgr = ngrOn ? (vSistemKv * 1000 / Math.sqrt(3)) / ngrCurrentA : null;
 
     const withTimes = rows.map(r => {
       const Mphase = (ifPhaseMaxKa * 1000) / r.pickup51;
@@ -68,7 +68,7 @@ export default function GarduInduk() {
     }
 
     setResult({
-      ngrOn, groundEvalA, rNgr, withTimes, phaseMargins, groundMargins,
+      ngrOn, groundEvalA, ngrCurrentA, withTimes, phaseMargins, groundMargins,
       phaseCurves: withTimes.map(r => ({ pickup: r.pickup51, curveKey: r.curve, dial: r.dial51, color: r.color, label: `${r.name} (51)` })),
       groundCurves: withTimes.map(r => ({ pickup: pickupNDasar, curveKey: r.curve, dial: r.dialN, color: r.color, label: `${r.name} (51N)` })),
     });
@@ -93,8 +93,8 @@ export default function GarduInduk() {
               <option value="Tidak Ada">Tidak Ada</option>
             </select></div>
           {ngrAda === 'Ada' ? (
-            <div className="field"><label>Arus Pembatas NGR <span className="unit">(A)</span></label>
-              <input type="number" step="1" value={ngrCurrentA} onChange={e => setNgrCurrentA(parseFloat(e.target.value))} /></div>
+            <div className="field"><label>Resistansi NGR <span className="unit">(Ω)</span></label>
+              <input type="number" step="0.1" value={ngrResistanceOhm} onChange={e => setNgrResistanceOhm(parseFloat(e.target.value))} /></div>
           ) : (
             <div className="field"><label>Arus Evaluasi Gangguan Tanah <span className="unit">(A)</span></label>
               <input type="number" step="1" value={groundEvalManual} onChange={e => setGroundEvalManual(parseFloat(e.target.value))} /></div>
@@ -148,11 +148,11 @@ export default function GarduInduk() {
               <div className="result-group-title">Neutral Grounding Resistor</div>
               {result.ngrOn ? (
                 <>
-                  <div className="result-row"><div><div className="result-label">Arus pembatas NGR</div></div>
-                    <div className="result-value">{fmt(ngrCurrentA, 0)}<span className="u">A</span></div></div>
-                  <div className="result-row"><div><div className="result-label">Nilai resistansi NGR</div><div className="result-formula">(V_sistem / √3) / I_NGR</div></div>
-                    <div className="result-value">{fmt(result.rNgr, 1)}<span className="u">Ω</span></div>
-                    <div className="result-note">Verifikasi rating waktu singkat (short-time rating, umumnya 10 detik) NGR ke pabrikan agar sesuai dengan waktu trip 51N terlama yang dihasilkan di bawah.</div>
+                  <div className="result-row"><div><div className="result-label">Resistansi NGR</div></div>
+                    <div className="result-value">{fmt(ngrResistanceOhm, 1)}<span className="u">Ω</span></div></div>
+                  <div className="result-row"><div><div className="result-label">Arus pembatas gangguan tanah</div><div className="result-formula">(V_sistem / √3) / R_NGR</div></div>
+                    <div className="result-value">{fmt(result.ngrCurrentA, 1)}<span className="u">A</span></div>
+                    <div className="result-note">Ini nilai arus gangguan tanah maksimum yang dipakai sebagai acuan evaluasi 51N/50N di bawah. Verifikasi juga rating waktu singkat (short-time rating, umumnya 10 detik) NGR ke pabrikan agar sesuai dengan waktu trip 51N terlama yang dihasilkan.</div>
                   </div>
                 </>
               ) : (
