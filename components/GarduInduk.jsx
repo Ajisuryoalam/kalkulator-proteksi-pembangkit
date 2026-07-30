@@ -15,11 +15,13 @@ const initialRows = [
 export default function GarduInduk() {
   const [vSistemKv, setVSistemKv] = useState(20);
   const [sTrafoMva, setSTrafoMva] = useState(10);
+  const [zTrafoPercent, setZTrafoPercent] = useState(8);
+  const [sScSourceMva, setSScSourceMva] = useState(3000);
   const [ngrAda, setNgrAda] = useState('Ada');
   const [ngrResistanceOhm, setNgrResistanceOhm] = useState(289);
   const [groundEvalManual, setGroundEvalManual] = useState(20);
-  const [ifPhaseMaxKa, setIfPhaseMaxKa] = useState(12.5);
-  const [pickupNDasar, setPickupNDasar] = useState(10);
+  const [pickupNPercent, setPickupNPercent] = useState(15);
+  const [pickupNManual, setPickupNManual] = useState(10);
   const [cti, setCti] = useState(0.3);
   const [rows, setRows] = useState(initialRows);
   const [result, setResult] = useState(null);
@@ -40,10 +42,20 @@ export default function GarduInduk() {
     setRows(prev => prev.filter(r => r.id !== id));
   }
 
+  const ngrCurrentLive = ngrAda === 'Ada' ? (vSistemKv * 1000 / Math.sqrt(3)) / ngrResistanceOhm : null;
+
   function hitung() {
     const ngrOn = ngrAda === 'Ada';
-    const ngrCurrentA = ngrOn ? (vSistemKv * 1000 / Math.sqrt(3)) / ngrResistanceOhm : null;
+    const ngrCurrentA = ngrOn ? ngrCurrentLive : null;
     const groundEvalA = ngrOn ? ngrCurrentA : groundEvalManual;
+    const pickupNDasar = ngrOn ? (pickupNPercent / 100) * ngrCurrentA : pickupNManual;
+
+    // Estimasi arus gangguan 3 fasa di bus sekunder: impedansi sumber (150kV) + impedansi trafo, seri, basis MVA trafo
+    const zSourcePu = sTrafoMva / sScSourceMva;
+    const zTrafoPu = zTrafoPercent / 100;
+    const zTotalPu = zSourcePu + zTrafoPu;
+    const sFaultMva = sTrafoMva / zTotalPu;
+    const ifPhaseMaxKa = sFaultMva / (Math.sqrt(3) * vSistemKv);
 
     const withTimes = rows.map(r => {
       const Mphase = (ifPhaseMaxKa * 1000) / r.pickup51;
@@ -68,7 +80,8 @@ export default function GarduInduk() {
     }
 
     setResult({
-      ngrOn, groundEvalA, ngrCurrentA, withTimes, phaseMargins, groundMargins,
+      ngrOn, groundEvalA, ngrCurrentA, pickupNDasar, withTimes, phaseMargins, groundMargins,
+      zSourcePu, zTrafoPu, zTotalPu, sFaultMva, ifPhaseMaxKa,
       phaseCurves: withTimes.map(r => ({ pickup: r.pickup51, curveKey: r.curve, dial: r.dial51, color: r.color, label: `${r.name} (51)` })),
       groundCurves: withTimes.map(r => ({ pickup: pickupNDasar, curveKey: r.curve, dial: r.dialN, color: r.color, label: `${r.name} (51N)` })),
     });
@@ -87,27 +100,38 @@ export default function GarduInduk() {
             <input type="number" step="0.1" value={vSistemKv} onChange={e => setVSistemKv(parseFloat(e.target.value))} /></div>
           <div className="field"><label>Daya Trafo Incoming <span className="unit">(MVA)</span></label>
             <input type="number" step="0.1" value={sTrafoMva} onChange={e => setSTrafoMva(parseFloat(e.target.value))} /></div>
+          <div className="field"><label>%Z Trafo (nameplate) <span className="unit">(%)</span></label>
+            <input type="number" step="0.1" value={zTrafoPercent} onChange={e => setZTrafoPercent(parseFloat(e.target.value))} /></div>
+          <div className="field"><label>MVA Hubung Singkat Sumber @ 150kV <span className="unit">(MVA)</span></label>
+            <input type="number" step="10" value={sScSourceMva} onChange={e => setSScSourceMva(parseFloat(e.target.value))} /></div>
           <div className="field"><label>NGR Terpasang?</label>
             <select value={ngrAda} onChange={e => setNgrAda(e.target.value)}>
               <option value="Ada">Ada</option>
               <option value="Tidak Ada">Tidak Ada</option>
             </select></div>
           {ngrAda === 'Ada' ? (
-            <div className="field"><label>Resistansi NGR <span className="unit">(Ω)</span></label>
-              <input type="number" step="0.1" value={ngrResistanceOhm} onChange={e => setNgrResistanceOhm(parseFloat(e.target.value))} /></div>
+            <>
+              <div className="field"><label>Resistansi NGR <span className="unit">(Ω)</span></label>
+                <input type="number" step="0.1" value={ngrResistanceOhm} onChange={e => setNgrResistanceOhm(parseFloat(e.target.value))} /></div>
+              <div className="field">
+                <label>Pickup 51N <span className="unit">(% dari arus NGR)</span></label>
+                <input type="number" step="1" value={pickupNPercent} onChange={e => setPickupNPercent(parseFloat(e.target.value))} />
+                <div className="result-formula" style={{ marginTop: 4 }}>≈ {fmt(ngrCurrentLive, 1)} A × {pickupNPercent}% = {fmt((pickupNPercent/100)*ngrCurrentLive, 1)} A</div>
+              </div>
+            </>
           ) : (
-            <div className="field"><label>Arus Evaluasi Gangguan Tanah <span className="unit">(A)</span></label>
-              <input type="number" step="1" value={groundEvalManual} onChange={e => setGroundEvalManual(parseFloat(e.target.value))} /></div>
+            <>
+              <div className="field"><label>Arus Evaluasi Gangguan Tanah <span className="unit">(A)</span></label>
+                <input type="number" step="1" value={groundEvalManual} onChange={e => setGroundEvalManual(parseFloat(e.target.value))} /></div>
+              <div className="field"><label>Pickup 51N Dasar <span className="unit">(A)</span></label>
+                <input type="number" step="0.1" value={pickupNManual} onChange={e => setPickupNManual(parseFloat(e.target.value))} /></div>
+            </>
           )}
-          <div className="field"><label>Arus Gangguan 3 Fasa Maks di Bus <span className="unit">(kA)</span></label>
-            <input type="number" step="0.1" value={ifPhaseMaxKa} onChange={e => setIfPhaseMaxKa(parseFloat(e.target.value))} /></div>
-          <div className="field"><label>Pickup 51N Dasar (semua kubikel) <span className="unit">(A)</span></label>
-            <input type="number" step="0.1" value={pickupNDasar} onChange={e => setPickupNDasar(parseFloat(e.target.value))} /></div>
           <div className="field"><label>CTI Minimum <span className="unit">(detik)</span></label>
             <input type="number" step="0.01" value={cti} onChange={e => setCti(parseFloat(e.target.value))} /></div>
         </div>
         <div className="result-note" style={{ marginBottom: 16 }}>
-          Pickup 51N sengaja dibuat sama untuk semua kubikel (praktik umum sistem ber-NGR) — selektivitas dicapai lewat pengaturan waktu (TMS), bukan pickup, karena seluruh kubikel melihat arus gangguan tanah yang sama besarnya.
+          Arus gangguan 3 fasa dihitung otomatis dari impedansi sumber (150kV) seri dengan %Z trafo, basis daya trafo — estimasi ini mengabaikan impedansi feeder di luar trafo (kondisi terburuk/bus fault). Pickup 51N default 10–20% dari arus NGR mengikuti praktik umum (IEEE Std 242 "Buff Book" &amp; IEEE C37.101); pickup 51N sama untuk semua kubikel, selektivitas dicapai lewat TMS.
         </div>
 
         <div className="coord-head-row" style={{ gridTemplateColumns: '1.4fr 0.8fr 0.8fr 0.7fr 0.7fr 1.3fr 34px' }}>
@@ -145,6 +169,22 @@ export default function GarduInduk() {
           <div className="card">
             <h2>NGR &amp; Ringkasan Evaluasi</h2>
             <div className="result-group">
+              <div className="result-group-title">Estimasi Arus Gangguan 3 Fasa di Bus</div>
+              <div className="result-row"><div><div className="result-label">Impedansi sumber (basis MVA trafo)</div><div className="result-formula">S_trafo / MVA_hubung-singkat-sumber</div></div>
+                <div className="result-value">{fmt(result.zSourcePu*100, 2)}<span className="u">%</span></div></div>
+              <div className="result-row"><div><div className="result-label">Impedansi trafo (nameplate)</div></div>
+                <div className="result-value">{fmt(result.zTrafoPu*100, 2)}<span className="u">%</span></div></div>
+              <div className="result-row"><div><div className="result-label">Impedansi total</div><div className="result-formula">Z_sumber + Z_trafo</div></div>
+                <div className="result-value">{fmt(result.zTotalPu*100, 2)}<span className="u">%</span></div></div>
+              <div className="result-row"><div><div className="result-label">Kapasitas hubung singkat di bus</div><div className="result-formula">S_trafo / Z_total</div></div>
+                <div className="result-value">{fmt(result.sFaultMva, 1)}<span className="u">MVA</span></div></div>
+              <div className="result-row"><div><div className="result-label">Arus gangguan 3 fasa maksimum</div><div className="result-formula">S_fault / (√3 × V_sistem)</div></div>
+                <div className="result-value">{fmt(result.ifPhaseMaxKa, 2)}<span className="u">kA</span></div>
+                <div className="result-note">Estimasi sederhana (sumber + trafo seri, mengabaikan impedansi feeder) — untuk keperluan setting akhir, verifikasi dengan studi hubung singkat penuh (mis. ETAP/DigSILENT) sesuai metodologi IEC 60909 atau ANSI/IEEE C37.010.</div>
+              </div>
+            </div>
+
+            <div className="result-group">
               <div className="result-group-title">Neutral Grounding Resistor</div>
               {result.ngrOn ? (
                 <>
@@ -153,6 +193,10 @@ export default function GarduInduk() {
                   <div className="result-row"><div><div className="result-label">Arus pembatas gangguan tanah</div><div className="result-formula">(V_sistem / √3) / R_NGR</div></div>
                     <div className="result-value">{fmt(result.ngrCurrentA, 1)}<span className="u">A</span></div>
                     <div className="result-note">Ini nilai arus gangguan tanah maksimum yang dipakai sebagai acuan evaluasi 51N/50N di bawah. Verifikasi juga rating waktu singkat (short-time rating, umumnya 10 detik) NGR ke pabrikan agar sesuai dengan waktu trip 51N terlama yang dihasilkan.</div>
+                  </div>
+                  <div className="result-row"><div><div className="result-label">Pickup 51N terpakai</div><div className="result-formula">{pickupNPercent}% × arus NGR</div></div>
+                    <div className="result-value">{fmt(result.pickupNDasar, 1)}<span className="u">A</span></div>
+                    <div className="result-note">Mengikuti praktik umum IEEE Std 242 (Buff Book) / IEEE C37.101 untuk sistem ber-NGR, rentang tipikal 10–20% arus NGR.</div>
                   </div>
                 </>
               ) : (
@@ -193,7 +237,7 @@ export default function GarduInduk() {
 
           <div className="card">
             <h2>Overlay TCC — Fasa (51/50)</h2>
-            <div className="chart-wrap"><TCCAmpsChart curves={result.phaseCurves} evalA={ifPhaseMaxKa * 1000} /></div>
+            <div className="chart-wrap"><TCCAmpsChart curves={result.phaseCurves} evalA={result.ifPhaseMaxKa * 1000} /></div>
             <div className="chart-legend">
               {result.phaseCurves.map((c, i) => <div className="legend-item" key={i}><span className="swatch" style={{ background: c.color }} />{c.label}</div>)}
             </div>
