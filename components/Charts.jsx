@@ -59,8 +59,8 @@ export function TCCAmpsChart({ curves, evalA }) {
       <AxisLabel x={16} y={g.MT + g.ph / 2} rotate>Waktu trip (detik)</AxisLabel>
       {g.paths.map((p, i) => (
         <g key={i}>
-          <path d={p.d} fill="none" stroke={p.color} strokeWidth={p.dashed ? '1.8' : '2.2'} strokeDasharray={p.dashed ? '6,4' : undefined} />
-          <circle cx={p.dot.x} cy={p.dot.y} r="4" fill="var(--void)" stroke={p.color} strokeWidth="2" />
+          {p.d && <path d={p.d} fill="none" stroke={p.color} strokeWidth={p.dashed ? '1.8' : '2.2'} strokeDasharray={p.dashed ? '6,4' : undefined} />}
+          {p.dot && <circle cx={p.dot.x} cy={p.dot.y} r="4" fill="var(--void)" stroke={p.color} strokeWidth="2" />}
         </g>
       ))}
       <line x1={g.evalX} y1={g.MT} x2={g.evalX} y2={g.MT + g.ph} stroke="var(--cyan)" strokeWidth="1.3" strokeDasharray="4,3" />

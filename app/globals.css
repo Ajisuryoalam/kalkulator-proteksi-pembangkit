@@ -74,3 +74,40 @@ main{min-width:0;}
 .nameplate{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;justify-content:flex-end;font-family:var(--mono);font-size:10.5px;color:var(--text-faint);}
 .nameplate b{color:var(--text-muted);font-weight:600;}
 .nameplate-dot{width:5px;height:5px;border-radius:50%;background:var(--amber-dim);}
+
+/* SEL-749M motor grading */
+.emphasis-note{padding:10px 12px;background:#171D21;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:4px;}
+.emphasis-note b{color:var(--amber);}
+.section-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:8px 0 10px;}
+.section-title-row h3{font-family:var(--cond);font-size:15px;margin:0 0 2px;font-weight:600;}
+.section-help{font-size:11.5px;color:var(--text-faint);line-height:1.4;}
+.config-card{border:1px solid var(--line);border-radius:6px;background:var(--panel-2);padding:14px;margin-bottom:10px;}
+.config-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.config-card-title{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;}
+.config-color{width:9px;height:9px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,.05);}
+.compact-remove{width:32px;min-width:32px;}
+.motor-grid{grid-template-columns:repeat(5,minmax(130px,1fr));margin-bottom:0;}
+.upstream-grid{grid-template-columns:1.4fr .7fr 1.5fr .7fr;margin-bottom:0;}
+.grading-grid{grid-template-columns:repeat(4,minmax(150px,1fr));}
+.field-wide{grid-column:span 2;}
+.grading-result{border:1px solid var(--line);border-left-width:3px;border-radius:5px;padding:12px;margin-bottom:10px;background:var(--panel-2);}
+.grading-ok{border-left-color:var(--green);}
+.grading-fail{border-left-color:var(--red);}
+.grading-result-head{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:12.5px;margin-bottom:10px;}
+.grading-result-head span{font-family:var(--mono);font-size:10px;letter-spacing:.08em;}
+.grading-ok .grading-result-head span{color:var(--green);}
+.grading-fail .grading-result-head span{color:var(--red);}
+.grading-metrics{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin-bottom:8px;}
+.grading-metrics div{background:var(--void);border:1px solid var(--line-soft);padding:8px;border-radius:4px;}
+.grading-metrics small{display:block;color:var(--text-faint);font-family:var(--mono);font-size:9.5px;text-transform:uppercase;margin-bottom:3px;}
+.grading-metrics strong{display:block;color:var(--amber);font-family:var(--mono);font-size:12.5px;}
+@media (max-width:1050px){
+  .motor-grid{grid-template-columns:repeat(3,minmax(140px,1fr));}
+  .upstream-grid{grid-template-columns:repeat(2,minmax(160px,1fr));}
+  .grading-grid{grid-template-columns:repeat(2,minmax(160px,1fr));}
+}
+@media (max-width:700px){
+  .section-title-row{flex-direction:column;}
+  .motor-grid,.upstream-grid,.grading-grid,.grading-metrics{grid-template-columns:1fr;}
+  .field-wide{grid-column:span 1;}
+}

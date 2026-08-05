@@ -77,3 +77,22 @@ lib/
 - Login & database (Supabase) untuk membedakan pengguna gratis/premium
 - Integrasi pembayaran langganan (Midtrans/Xendit)
 - Halaman harga & dashboard akun
+
+## Pembaruan Grading Motor SEL-749M (v1.1)
+
+Modul **Grading Motor SEL-749M (49T)** telah diperbaiki agar menggunakan persamaan trip-time yang dipublikasikan pada *SEL-749M Instruction Manual*, Appendix F, Equation F.10–F.17.
+
+Perubahan utama:
+
+- Input disesuaikan dengan istilah setting relay: FLA, Service Factor, LRA, LRTHOT, Acceleration Factor TD, RTC, dan Curve Number 1–45.
+- Mendukung **Rating Method** dan **Curve Method**.
+- Model dibagi menjadi daerah **RUNNING** (`SF < I < 2,5 × FLA`) dan **STARTING** (`2,5 × FLA ≤ I ≤ 12 × FLA`).
+- Batas pickup 50S pada `2,5 × FLA` ditampilkan sebagai batas model STARTING; dropout relay `2,4 × FLA` dicatat sebagai histeresis, bukan kurva definite-time 51LR terpisah.
+- Setiap motor dapat dipetakan ke perangkat upstream tertentu.
+- CTI dihitung di seluruh rentang arus grading menggunakan margin minimum `t_upstream − t_motor`, bukan hanya pada satu titik arus.
+- Kurva tidak lagi menggambar kondisi tidak pickup sebagai trip pada batas atas grafik.
+- Sumbu waktu TCC diperluas sampai 100.000 detik.
+
+### Batas penggunaan
+
+Modul ini mereplikasi persamaan trip-time publik untuk verifikasi TCC. Modul belum merupakan emulasi firmware lengkap dan belum memasukkan seluruh perilaku dinamis relay, seperti adaptive threshold ramping, %TCU aktual, RTD bias, cooling state, toleransi CT/relay, waktu circuit breaker, dan elemen 50P. Hasil wajib diverifikasi terhadap data motor, studi hubung singkat, setting sheet, dan pengujian sekunder sebelum diterapkan.

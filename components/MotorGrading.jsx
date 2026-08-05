@@ -1,198 +1,584 @@
 'use client';
+
 import { useState } from 'react';
-import { CURVES, CURVE_OPTIONS, timeAt, motorThermalTime, fmt } from '../lib/curves';
+import {
+  CURVES,
+  CURVE_OPTIONS,
+  SEL749M_METHOD_OPTIONS,
+  SEL749M_STATE_OPTIONS,
+  fmt,
+  scanCoordinationMargin,
+  sel749mThermalResult,
+  sel749mThermalTime,
+  timeAt,
+  validateSel749mMotor,
+} from '../lib/curves';
 import { TCCAmpsChart } from './Charts';
 
 const COLORS = ['#F0A830', '#4FD4D8', '#4ADE80', '#EF5350', '#B388FF', '#FFD166', '#6FCF97', '#F2994A'];
-let motorId = 3, upId = 1;
+let motorId = 3;
+let upId = 1;
 
 const initialMotors = [
-  { id: 0, name: 'Cooling Tower Fan (CVF)', ith: 21, tau: 28, theta0Pct: 80, idIth: 4.5, td: 6, pickupN: 0.5, tN: 0.5, color: COLORS[0] },
-  { id: 1, name: 'Forced Draft Fan (FDF)', ith: 25, tau: 25, theta0Pct: 70, idIth: 5.0, td: 8, pickupN: 0.5, tN: 0.5, color: COLORS[1] },
-  { id: 2, name: 'Boiler Feed Pump (BFP)', ith: 32, tau: 32, theta0Pct: 75, idIth: 4.8, td: 7, pickupN: 0.5, tN: 0.5, color: COLORS[2] },
+  {
+    id: 0,
+    name: 'Cooling Tower Fan (CVF)',
+    upstreamId: 0,
+    fla: 21,
+    sf: 1.15,
+    method: 'rating',
+    lra: 4.5,
+    lrthot: 6,
+    td: 1,
+    rtcMode: 'auto',
+    rtc: 28,
+    curve: 5,
+    initialState: 'hot',
+    color: COLORS[0],
+  },
+  {
+    id: 1,
+    name: 'Forced Draft Fan (FDF)',
+    upstreamId: 0,
+    fla: 25,
+    sf: 1.15,
+    method: 'rating',
+    lra: 5,
+    lrthot: 8,
+    td: 1,
+    rtcMode: 'auto',
+    rtc: 25,
+    curve: 7,
+    initialState: 'hot',
+    color: COLORS[1],
+  },
+  {
+    id: 2,
+    name: 'Boiler Feed Pump (BFP)',
+    upstreamId: 0,
+    fla: 32,
+    sf: 1.15,
+    method: 'rating',
+    lra: 4.8,
+    lrthot: 7,
+    td: 1,
+    rtcMode: 'auto',
+    rtc: 32,
+    curve: 6,
+    initialState: 'hot',
+    color: COLORS[2],
+  },
 ];
+
 const initialUpstream = [
   { id: 0, name: 'Feeder MCC / Incoming', pickup: 100, curve: 'IEC-VI', dial: 0.88, color: COLORS[3] },
 ];
 
+const TEXT_FIELDS = new Set(['name', 'method', 'rtcMode', 'initialState']);
+
+function numberOrBlank(value) {
+  return value === '' ? '' : Number(value);
+}
+
+function regionLabel(region) {
+  const labels = {
+    'below-pickup': 'Di bawah pickup thermal (I ≤ SF)',
+    running: 'RUNNING model (SF < I < 2,5 × FLA)',
+    starting: 'STARTING model (2,5–12 × FLA)',
+    'outside-published-range': 'Di luar rentang persamaan publik (>12 × FLA)',
+    invalid: 'Input tidak valid',
+  };
+  return labels[region] || region;
+}
+
+function timeLabel(time) {
+  if (time === Infinity) return 'Tidak pickup';
+  if (!Number.isFinite(time)) return 'Di luar model';
+  return `${fmt(time, 2)} s`;
+}
+
+function methodLabel(motor) {
+  if (motor.method === 'curve') return `Curve Method, Curve ${motor.curve}`;
+  const rtc = motor.rtcMode === 'auto' ? 'RTC Auto' : `RTC ${fmt(motor.rtc, 1)} menit`;
+  return `Rating Method, LRA ${fmt(motor.lra, 2)} × FLA, LRTHOT ${fmt(motor.lrthot, 1)} s, TD ${fmt(motor.td, 2)}, ${rtc}`;
+}
+
 export default function MotorGrading() {
   const [motors, setMotors] = useState(initialMotors);
   const [upstream, setUpstream] = useState(initialUpstream);
-  const [evalA, setEvalA] = useState(300);
+  const [evalA, setEvalA] = useState(200);
   const [cti, setCti] = useState(0.3);
+  const [gradingMinA, setGradingMinA] = useState(50);
+  const [gradingMaxA, setGradingMaxA] = useState(500);
   const [result, setResult] = useState(null);
 
-  function updMotor(id, f, v) {
-    setMotors(prev => prev.map(m => m.id === id ? { ...m, [f]: ['name'].includes(f) ? v : parseFloat(v) } : m));
+  function updMotor(id, field, value) {
+    setMotors(prev => prev.map(motor => {
+      if (motor.id !== id) return motor;
+      if (field === 'upstreamId') return { ...motor, upstreamId: value === '' ? null : Number(value) };
+      if (TEXT_FIELDS.has(field)) return { ...motor, [field]: value };
+      return { ...motor, [field]: numberOrBlank(value) };
+    }));
   }
-  function addMotor() {
-    setMotors(prev => [...prev, { id: motorId++, name: 'Motor baru', ith: 5, tau: 25, theta0Pct: 70, idIth: 5, td: 8, pickupN: 0.5, tN: 0.5, color: COLORS[prev.length % COLORS.length] }]);
-  }
-  function removeMotor(id) { setMotors(prev => prev.filter(m => m.id !== id)); }
 
-  function updUp(id, f, v) {
-    setUpstream(prev => prev.map(u => u.id === id ? { ...u, [f]: f === 'name' || f === 'curve' ? v : parseFloat(v) } : u));
+  function addMotor() {
+    const selectedUpstream = upstream[0]?.id ?? null;
+    setMotors(prev => [
+      ...prev,
+      {
+        id: motorId++,
+        name: 'Motor baru',
+        upstreamId: selectedUpstream,
+        fla: 10,
+        sf: 1.15,
+        method: 'rating',
+        lra: 6,
+        lrthot: 10,
+        td: 1,
+        rtcMode: 'auto',
+        rtc: 30,
+        curve: 5,
+        initialState: 'hot',
+        color: COLORS[prev.length % COLORS.length],
+      },
+    ]);
   }
+
+  function removeMotor(id) {
+    setMotors(prev => prev.filter(motor => motor.id !== id));
+  }
+
+  function updUp(id, field, value) {
+    setUpstream(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      if (field === 'name' || field === 'curve') return { ...item, [field]: value };
+      return { ...item, [field]: numberOrBlank(value) };
+    }));
+  }
+
   function addUpstream() {
-    setUpstream(prev => [...prev, { id: upId++, name: 'Upstream baru', pickup: 40, curve: 'IEC-VI', dial: 0.3, color: COLORS[(prev.length + motors.length) % COLORS.length] }]);
+    const newId = upId++;
+    setUpstream(prev => [
+      ...prev,
+      {
+        id: newId,
+        name: 'Upstream baru',
+        pickup: 100,
+        curve: 'IEC-VI',
+        dial: 0.5,
+        color: COLORS[(prev.length + motors.length) % COLORS.length],
+      },
+    ]);
   }
-  function removeUp(id) { setUpstream(prev => prev.filter(u => u.id !== id)); }
+
+  function removeUp(id) {
+    setUpstream(prev => {
+      const next = prev.filter(item => item.id !== id);
+      const fallbackId = next[0]?.id ?? null;
+      setMotors(current => current.map(motor => (
+        motor.upstreamId === id ? { ...motor, upstreamId: fallbackId } : motor
+      )));
+      return next;
+    });
+  }
 
   function hitung() {
-    const motorRes = motors.map(m => {
-      const theta0 = m.theta0Pct / 100;
-      const M = evalA / m.ith;
-      const tThermal = motorThermalTime(M, theta0, m.tau);
-      const pickupLR = m.idIth * m.ith;
-      return { ...m, M, tThermal, pickupLR };
-    });
-    const upRes = upstream.map(u => {
-      const M = evalA / u.pickup;
-      const t = timeAt(u.curve, u.dial, M);
-      return { ...u, M, t };
-    });
+    const minA = Number(gradingMinA);
+    const maxA = Number(gradingMaxA);
+    const evaluationCurrent = Number(evalA);
+    const minimumCti = Number(cti);
+    const validationErrors = [];
 
-    const combined = [
-      ...motorRes.map(m => ({ name: `${m.name} (49 Thermal)`, t: m.tThermal })),
-      ...upRes.map(u => ({ name: u.name, t: u.t })),
-    ].sort((a, b) => a.t - b.t);
-    const margins = [];
-    for (let i = 1; i < combined.length; i++) {
-      const mrg = combined[i].t - combined[i - 1].t;
-      margins.push({ ok: mrg >= cti, a: combined[i - 1].name, b: combined[i].name, m: mrg });
-    }
+    if (!motors.length) validationErrors.push('Tambahkan sekurang-kurangnya satu motor.');
+    if (!(evaluationCurrent > 0)) validationErrors.push('Arus evaluasi harus lebih besar dari nol.');
+    if (!(minimumCti >= 0)) validationErrors.push('CTI minimum tidak boleh negatif.');
+    if (!(minA > 0 && maxA > minA)) validationErrors.push('Rentang arus grading harus memenuhi I maksimum > I minimum > 0.');
+
+    const upstreamResults = upstream.map(item => {
+      const errors = [];
+      if (!(item.pickup > 0)) errors.push('Pickup harus lebih besar dari nol.');
+      if (!(item.dial > 0)) errors.push('TMS/TD harus lebih besar dari nol.');
+      if (!CURVES[item.curve]) errors.push('Kurva upstream tidak valid.');
+      const M = evaluationCurrent / item.pickup;
+      return { ...item, errors, M, time: timeAt(item.curve, item.dial, M) };
+    });
+    const upResultById = new Map(upstreamResults.map(item => [item.id, item]));
+
+    const motorResults = motors.map(motor => {
+      const errors = validateSel749mMotor(motor);
+      const thermal = sel749mThermalResult(evaluationCurrent, motor);
+      const assignedUpstream = upResultById.get(motor.upstreamId) || null;
+      let grading = null;
+      let pointMargin = null;
+
+      if (!errors.length && assignedUpstream && !assignedUpstream.errors.length && minA > 0 && maxA > minA) {
+        grading = scanCoordinationMargin({
+          downstreamFn: currentA => sel749mThermalTime(currentA, motor),
+          upstreamFn: currentA => timeAt(
+            assignedUpstream.curve,
+            assignedUpstream.dial,
+            currentA / assignedUpstream.pickup,
+          ),
+          minA,
+          maxA,
+          breakpoints: [
+            motor.sf * motor.fla,
+            2.5 * motor.fla,
+            12 * motor.fla,
+            assignedUpstream.pickup,
+          ],
+        });
+
+        const tDown = thermal.time;
+        const tUp = assignedUpstream.time;
+        if (Number.isFinite(tDown) && Number.isFinite(tUp)) {
+          pointMargin = tUp - tDown;
+        }
+      }
+
+      return {
+        ...motor,
+        errors,
+        thermal,
+        assignedUpstream,
+        grading,
+        pointMargin,
+      };
+    });
 
     const curves = [];
-    motorRes.forEach(m => {
-      const theta0 = m.theta0Pct / 100;
+    motorResults.forEach(motor => {
+      if (motor.errors.length) return;
+      const state = motor.initialState === 'cold' ? 'cold' : 'hot';
+      const method = motor.method === 'curve' ? `Curve ${motor.curve}` : 'Rating';
       curves.push({
-        pickup: m.ith, color: m.color, label: `${m.name} — 49 Thermal (τ=${m.tau}mnt, θ0=${m.theta0Pct}%)`,
-        timeFn: I => motorThermalTime(I / m.ith, theta0, m.tau),
+        pickup: motor.sf * motor.fla,
+        maxCurrent: 12 * motor.fla,
+        color: motor.color,
+        label: `${motor.name} — SEL-749M 49T (${method}, ${state})`,
+        timeFn: currentA => sel749mThermalTime(currentA, motor),
       });
       curves.push({
-        pickup: m.pickupLR, color: m.color, dashed: true, label: `${m.name} — 51LR (Id/Ith=${m.idIth}×, Td=${m.td}s)`,
-        timeFn: I => I >= m.pickupLR ? m.td : Infinity,
+        kind: 'vertical',
+        at: 2.5 * motor.fla,
+        pickup: 2.5 * motor.fla,
+        maxCurrent: 12 * motor.fla,
+        color: motor.color,
+        dashed: true,
+        label: `${motor.name} — 50S pickup 2,5 × FLA (dropout 2,4 × FLA)`,
       });
     });
-    upRes.forEach(u => {
-      curves.push({ pickup: u.pickup, curveKey: u.curve, dial: u.dial, color: u.color, label: `${u.name} (${CURVES[u.curve].name})` });
+    upstreamResults.forEach(item => {
+      if (item.errors.length) return;
+      curves.push({
+        pickup: item.pickup,
+        maxCurrent: item.pickup * 15,
+        curveKey: item.curve,
+        dial: item.dial,
+        color: item.color,
+        label: `${item.name} (${CURVES[item.curve].name})`,
+      });
     });
 
-    setResult({ motorRes, upRes, margins, curves });
+    setResult({
+      validationErrors,
+      motorResults,
+      upstreamResults,
+      curves,
+      minA,
+      maxA,
+      evaluationCurrent,
+      minimumCti,
+    });
   }
 
   return (
     <div>
       <div className="card">
-        <h2>Grading TCC Proteksi Motor (49 Thermal / 51LR)</h2>
+        <h2>Grading TCC Proteksi Motor — SEL-749M</h2>
         <div className="desc">
-          Overlay kurva thermal replica (IEC 60255-8) dan locked rotor beberapa motor sekaligus, opsional dibandingkan terhadap proteksi feeder/incoming MCC di atasnya.
-        </div>
-        <div className="result-note" style={{ marginBottom: 16 }}>
-          <b style={{ color: 'var(--text)' }}>Penting:</b> Ith motor biasanya nilai sisi sekunder CT motor itu sendiri, sedangkan pickup feeder/incoming direferensikan ke CT-nya sendiri yang bisa beda rasio. Supaya arus evaluasi &amp; grading di bawah bermakna, pastikan semua nilai (Ith motor, pickup upstream, arus evaluasi) sudah direferensikan ke basis arus yang sama — misalnya arus primer/sisi sistem, bukan langsung dicampur dari sekunder CT yang rasionya beda.
+          Perhitungan 49T menggunakan persamaan trip-time SEL-749M Appendix F (F.10–F.17). Elemen 50S ditampilkan sebagai batas pickup model STARTING pada 2,5 × FLA (dropout relay 2,4 × FLA), bukan sebagai kurva definite-time 51LR terpisah.
         </div>
 
-        <div className="coord-head-row" style={{ gridTemplateColumns: '1.3fr 0.7fr 0.7fr 0.7fr 0.7fr 0.6fr 34px' }}>
-          <div className="coord-head">Motor</div>
-          <div className="coord-head">Ith (A)</div>
-          <div className="coord-head">τ (menit)</div>
-          <div className="coord-head">θ0 (%)</div>
-          <div className="coord-head">Id/Ith (51LR)</div>
-          <div className="coord-head">Td 51LR (s)</div>
-          <div></div>
+        <div className="result-note emphasis-note" style={{ marginBottom: 16 }}>
+          <b>Basis arus wajib sama:</b> FLA motor, pickup upstream, arus evaluasi, dan rentang grading harus semuanya dinyatakan pada sisi primer/sisi sistem yang sama. Jangan mencampur nilai sekunder CT dengan rasio berbeda.
         </div>
-        {motors.map(m => (
-          <div className="coord-row" style={{ gridTemplateColumns: '1.3fr 0.7fr 0.7fr 0.7fr 0.7fr 0.6fr 34px' }} key={m.id}>
-            <input className="coord-input" type="text" value={m.name} onChange={e => updMotor(m.id, 'name', e.target.value)} />
-            <input className="coord-input" type="number" step="0.1" value={m.ith} onChange={e => updMotor(m.id, 'ith', e.target.value)} />
-            <input className="coord-input" type="number" step="1" value={m.tau} onChange={e => updMotor(m.id, 'tau', e.target.value)} />
-            <input className="coord-input" type="number" step="1" value={m.theta0Pct} onChange={e => updMotor(m.id, 'theta0Pct', e.target.value)} />
-            <input className="coord-input" type="number" step="0.1" value={m.idIth} onChange={e => updMotor(m.id, 'idIth', e.target.value)} />
-            <input className="coord-input" type="number" step="0.5" value={m.td} onChange={e => updMotor(m.id, 'td', e.target.value)} />
-            <button className="coord-remove" onClick={() => removeMotor(m.id)}>×</button>
+
+        <div className="section-title-row">
+          <div>
+            <h3>Data motor dan setting thermal</h3>
+            <div className="section-help">Rentang input mengikuti SEL-749M Settings Sheets.</div>
+          </div>
+          <button className="btn-secondary" onClick={addMotor}>+ Tambah Motor</button>
+        </div>
+
+        {motors.map((motor, index) => (
+          <div className="config-card" key={motor.id}>
+            <div className="config-card-head">
+              <div className="config-card-title">
+                <span className="config-color" style={{ background: motor.color }} />
+                Motor {index + 1}
+              </div>
+              <button className="coord-remove compact-remove" onClick={() => removeMotor(motor.id)} aria-label={`Hapus ${motor.name}`}>×</button>
+            </div>
+
+            <div className="grid-inputs motor-grid">
+              <div className="field field-wide">
+                <label>Nama motor</label>
+                <input type="text" value={motor.name} onChange={e => updMotor(motor.id, 'name', e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Upstream terkait</label>
+                <select value={motor.upstreamId ?? ''} onChange={e => updMotor(motor.id, 'upstreamId', e.target.value)}>
+                  <option value="">— Belum dipilih —</option>
+                  {upstream.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>FLA <span className="unit">(A primer)</span></label>
+                <input type="number" min="0.2" max="5000" step="0.1" value={motor.fla} onChange={e => updMotor(motor.id, 'fla', e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Service Factor</label>
+                <input type="number" min="1.01" max="1.5" step="0.01" value={motor.sf} onChange={e => updMotor(motor.id, 'sf', e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Thermal Method</label>
+                <select value={motor.method} onChange={e => updMotor(motor.id, 'method', e.target.value)}>
+                  {SEL749M_METHOD_OPTIONS.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Kondisi awal</label>
+                <select value={motor.initialState} onChange={e => updMotor(motor.id, 'initialState', e.target.value)}>
+                  {SEL749M_STATE_OPTIONS.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+
+              {motor.method === 'rating' ? (
+                <>
+                  <div className="field">
+                    <label>LRA <span className="unit">(× FLA)</span></label>
+                    <input type="number" min="2.5" max="12" step="0.1" value={motor.lra} onChange={e => updMotor(motor.id, 'lra', e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>LRTHOT <span className="unit">(detik)</span></label>
+                    <input type="number" min="1" max="600" step="0.5" value={motor.lrthot} onChange={e => updMotor(motor.id, 'lrthot', e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Acceleration Factor TD</label>
+                    <input type="number" min="0.1" max="1.5" step="0.05" value={motor.td} onChange={e => updMotor(motor.id, 'td', e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>RTC mode</label>
+                    <select value={motor.rtcMode} onChange={e => updMotor(motor.id, 'rtcMode', e.target.value)}>
+                      <option value="auto">Auto</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </div>
+                  {motor.rtcMode === 'manual' && (
+                    <div className="field">
+                      <label>RTC <span className="unit">(menit)</span></label>
+                      <input type="number" min="1" max="2000" step="1" value={motor.rtc} onChange={e => updMotor(motor.id, 'rtc', e.target.value)} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="field">
+                  <label>Curve Number <span className="unit">(1–45)</span></label>
+                  <input type="number" min="1" max="45" step="1" value={motor.curve} onChange={e => updMotor(motor.id, 'curve', e.target.value)} />
+                </div>
+              )}
+            </div>
           </div>
         ))}
-        <button className="btn-secondary" onClick={addMotor} style={{ marginTop: 6 }}>+ Tambah Motor</button>
 
-        <div className="result-note" style={{ margin: '16px 0' }}>
-          Rumus thermal (IEC 60255-8): t = τ × ln[(M² − θ0)/(M² − 1)], dengan M = I/Ith. 51LR ditampilkan sebagai definite-time (garis putus-putus) mulai dari pickup Id/Ith × Ith.
+        <div className="section-title-row" style={{ marginTop: 22 }}>
+          <div>
+            <h3>Perangkat upstream</h3>
+            <div className="section-help">Setiap motor memilih perangkat upstream yang benar-benar berada pada jalur serinya.</div>
+          </div>
+          <button className="btn-secondary" onClick={addUpstream}>+ Tambah Upstream</button>
         </div>
 
-        <h2 style={{ marginTop: 4 }}>Upstream (Feeder / Incoming MCC) — opsional</h2>
-        <div className="coord-head-row" style={{ gridTemplateColumns: '1.6fr 1fr 1.9fr 0.9fr 34px' }}>
-          <div className="coord-head">Nama</div>
-          <div className="coord-head">Pickup (A)</div>
-          <div className="coord-head">Standar &amp; Kurva</div>
-          <div className="coord-head">TMS/TD</div>
-          <div></div>
-        </div>
-        {upstream.map(u => (
-          <div className="coord-row" style={{ gridTemplateColumns: '1.6fr 1fr 1.9fr 0.9fr 34px' }} key={u.id}>
-            <input className="coord-input" type="text" value={u.name} onChange={e => updUp(u.id, 'name', e.target.value)} />
-            <input className="coord-input" type="number" step="1" value={u.pickup} onChange={e => updUp(u.id, 'pickup', e.target.value)} />
-            <select className="coord-input" value={u.curve} onChange={e => updUp(u.id, 'curve', e.target.value)}>
-              {CURVE_OPTIONS.map(o => <option value={o.value} key={o.value}>{o.label}</option>)}
-            </select>
-            <input className="coord-input" type="number" step="0.01" value={u.dial} onChange={e => updUp(u.id, 'dial', e.target.value)} />
-            <button className="coord-remove" onClick={() => removeUp(u.id)}>×</button>
+        {upstream.map((item, index) => (
+          <div className="config-card upstream-card" key={item.id}>
+            <div className="config-card-head">
+              <div className="config-card-title">
+                <span className="config-color" style={{ background: item.color }} />
+                Upstream {index + 1}
+              </div>
+              <button className="coord-remove compact-remove" onClick={() => removeUp(item.id)} aria-label={`Hapus ${item.name}`}>×</button>
+            </div>
+            <div className="grid-inputs upstream-grid">
+              <div className="field field-wide">
+                <label>Nama perangkat</label>
+                <input type="text" value={item.name} onChange={e => updUp(item.id, 'name', e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Pickup <span className="unit">(A primer)</span></label>
+                <input type="number" min="0.01" step="0.1" value={item.pickup} onChange={e => updUp(item.id, 'pickup', e.target.value)} />
+              </div>
+              <div className="field field-wide">
+                <label>Standar dan kurva</label>
+                <select value={item.curve} onChange={e => updUp(item.id, 'curve', e.target.value)}>
+                  {CURVE_OPTIONS.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>TMS / Time Dial</label>
+                <input type="number" min="0.001" step="0.01" value={item.dial} onChange={e => updUp(item.id, 'dial', e.target.value)} />
+              </div>
+            </div>
           </div>
         ))}
-        <button className="btn-secondary" onClick={addUpstream} style={{ marginTop: 6 }}>+ Tambah Upstream</button>
 
-        <div className="grid-inputs" style={{ marginTop: 16 }}>
-          <div className="field"><label>Arus Evaluasi <span className="unit">(A)</span></label>
-            <input type="number" step="0.1" value={evalA} onChange={e => setEvalA(parseFloat(e.target.value))} /></div>
-          <div className="field"><label>CTI Minimum <span className="unit">(detik)</span></label>
-            <input type="number" step="0.01" value={cti} onChange={e => setCti(parseFloat(e.target.value))} /></div>
+        <div className="grid-inputs grading-grid" style={{ marginTop: 20 }}>
+          <div className="field">
+            <label>Arus evaluasi <span className="unit">(A)</span></label>
+            <input type="number" min="0.01" step="0.1" value={evalA} onChange={e => setEvalA(numberOrBlank(e.target.value))} />
+          </div>
+          <div className="field">
+            <label>CTI minimum <span className="unit">(detik)</span></label>
+            <input type="number" min="0" step="0.01" value={cti} onChange={e => setCti(numberOrBlank(e.target.value))} />
+          </div>
+          <div className="field">
+            <label>Arus grading minimum <span className="unit">(A)</span></label>
+            <input type="number" min="0.01" step="0.1" value={gradingMinA} onChange={e => setGradingMinA(numberOrBlank(e.target.value))} />
+          </div>
+          <div className="field">
+            <label>Arus grading maksimum <span className="unit">(A)</span></label>
+            <input type="number" min="0.01" step="0.1" value={gradingMaxA} onChange={e => setGradingMaxA(numberOrBlank(e.target.value))} />
+          </div>
         </div>
-        <button className="btn-calc" onClick={hitung}>Hitung &amp; Plot Grading</button>
+
+        <button className="btn-calc" onClick={hitung}>Hitung dan Plot Grading SEL-749M</button>
       </div>
 
       {result && (
         <>
-          <div className="card">
-            <h2>Waktu Trip @ Arus Evaluasi &amp; Cek Grading</h2>
-            <div className="result-group">
-              <div className="result-group-title">Thermal (49) — per Motor</div>
-              {result.motorRes.map(m => (
-                <div className="result-row" key={m.id}>
-                  <div><div className="result-label">{m.name}</div>
-                    <div className="result-formula">M = {fmt(m.M, 2)}× &nbsp;|&nbsp; Pickup 51LR = {fmt(m.pickupLR, 2)} A @ {fmt(m.td, 1)}s</div></div>
-                  <div className="result-value">{fmt(m.tThermal, 2)}<span className="u">s</span></div>
-                </div>
-              ))}
+          {result.validationErrors.length > 0 && (
+            <div className="card">
+              <h2>Validasi input</h2>
+              {result.validationErrors.map((error, index) => <div className="flag-warn" key={index}>{error}</div>)}
             </div>
-            {result.upRes.length > 0 && (
+          )}
+
+          <div className="card">
+            <h2>Waktu Trip 49T pada Arus Evaluasi</h2>
+            <div className="desc">Arus evaluasi: {fmt(result.evaluationCurrent, 2)} A.</div>
+
+            {result.motorResults.map(motor => (
+              <div className="result-group" key={motor.id}>
+                <div className="result-group-title">{motor.name}</div>
+                {motor.errors.length ? (
+                  motor.errors.map((error, index) => <div className="flag-warn" key={index}>{error}</div>)
+                ) : (
+                  <>
+                    <div className="result-row">
+                      <div>
+                        <div className="result-label">SEL-749M Thermal 49T</div>
+                        <div className="result-formula">
+                          I = {fmt(motor.thermal.I, 3)} × FLA · {regionLabel(motor.thermal.region)}
+                        </div>
+                      </div>
+                      <div className="result-value">{timeLabel(motor.thermal.time)}</div>
+                    </div>
+                    <div className="result-note">
+                      {methodLabel(motor)}. RTC yang dipakai: {fmt(motor.thermal.rtcMinutes, 2)} menit.
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+
+            {result.upstreamResults.length > 0 && (
               <div className="result-group">
                 <div className="result-group-title">Upstream</div>
-                {result.upRes.map(u => (
-                  <div className="result-row" key={u.id}>
-                    <div><div className="result-label">{u.name}</div><div className="result-formula">M = {fmt(u.M, 2)}×</div></div>
-                    <div className="result-value">{fmt(u.t, 2)}<span className="u">s</span></div>
+                {result.upstreamResults.map(item => (
+                  <div key={item.id}>
+                    {item.errors.length ? (
+                      item.errors.map((error, index) => <div className="flag-warn" key={index}>{item.name}: {error}</div>)
+                    ) : (
+                      <div className="result-row">
+                        <div>
+                          <div className="result-label">{item.name}</div>
+                          <div className="result-formula">{CURVES[item.curve].name} · M = {fmt(item.M, 3)} × pickup</div>
+                        </div>
+                        <div className="result-value">{timeLabel(item.time)}</div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
-            <div className="result-group">
-              <div className="result-group-title">Cek Grading (urut tercepat → terlambat)</div>
-              {result.margins.map((mg, i) => (
-                <div key={i} className={mg.ok ? 'flag-ok' : 'flag-warn'}>
-                  {mg.a} → {mg.b}: margin {fmt(mg.m, 3)}s {mg.ok ? '— memenuhi CTI.' : `— KURANG dari CTI minimum ${fmt(cti, 2)}s.`}
-                </div>
-              ))}
-            </div>
           </div>
 
           <div className="card">
-            <h2>Overlay TCC — Thermal (49) + Locked Rotor (51LR) + Upstream</h2>
-            <div className="chart-wrap"><TCCAmpsChart curves={result.curves} evalA={evalA} /></div>
+            <h2>Cek Grading per Jalur Motor → Upstream</h2>
+            <div className="desc">
+              Margin minimum dicari pada seluruh rentang {fmt(result.minA, 2)}–{fmt(result.maxA, 2)} A. Motor paralel tidak dibandingkan satu sama lain.
+            </div>
+
+            {result.motorResults.map(motor => {
+              if (motor.errors.length) {
+                return <div className="flag-warn" key={motor.id}>{motor.name}: perbaiki setting motor sebelum grading.</div>;
+              }
+              if (!motor.assignedUpstream) {
+                return <div className="flag-warn" key={motor.id}>{motor.name}: perangkat upstream belum dipilih.</div>;
+              }
+              if (motor.assignedUpstream.errors.length) {
+                return <div className="flag-warn" key={motor.id}>{motor.name}: setting {motor.assignedUpstream.name} tidak valid.</div>;
+              }
+              if (!motor.grading?.valid) {
+                return (
+                  <div className="flag-warn" key={motor.id}>
+                    {motor.name} → {motor.assignedUpstream.name}: {motor.grading?.reason || 'Grading tidak dapat dihitung.'}
+                  </div>
+                );
+              }
+
+              const ok = motor.grading.margin >= result.minimumCti;
+              return (
+                <div className={ok ? 'grading-result grading-ok' : 'grading-result grading-fail'} key={motor.id}>
+                  <div className="grading-result-head">
+                    <b>{motor.name} → {motor.assignedUpstream.name}</b>
+                    <span>{ok ? 'MEMENUHI' : 'TIDAK MEMENUHI'}</span>
+                  </div>
+                  <div className="grading-metrics">
+                    <div><small>Margin minimum</small><strong>{fmt(motor.grading.margin, 3)} s</strong></div>
+                    <div><small>Terjadi pada arus</small><strong>{fmt(motor.grading.currentA, 2)} A</strong></div>
+                    <div><small>Waktu motor</small><strong>{fmt(motor.grading.downstreamTime, 3)} s</strong></div>
+                    <div><small>Waktu upstream</small><strong>{fmt(motor.grading.upstreamTime, 3)} s</strong></div>
+                  </div>
+                  <div className="result-note">
+                    Margin pada arus evaluasi: {motor.pointMargin === null ? 'tidak dapat dihitung karena salah satu elemen tidak pickup/di luar model' : `${fmt(motor.pointMargin, 3)} s`}. CTI minimum: {fmt(result.minimumCti, 3)} s.
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="card">
+            <h2>Overlay TCC — SEL-749M 49T + Batas 50S + Upstream</h2>
+            <div className="chart-wrap"><TCCAmpsChart curves={result.curves} evalA={result.evaluationCurrent} /></div>
             <div className="chart-legend">
-              {result.curves.map((c, i) => (
-                <div className="legend-item" key={i}><span className="swatch" style={{ background: c.color, opacity: c.dashed ? 0.7 : 1 }} />{c.label}</div>
+              {result.curves.map((curve, index) => (
+                <div className="legend-item" key={`${curve.label}-${index}`}>
+                  <span
+                    className="swatch"
+                    style={{
+                      background: curve.color,
+                      opacity: curve.dashed || curve.kind === 'vertical' ? 0.7 : 1,
+                      borderTop: curve.dashed || curve.kind === 'vertical' ? `1px dashed ${curve.color}` : undefined,
+                    }}
+                  />
+                  {curve.label}
+                </div>
               ))}
             </div>
             <div className="disclaimer">
-              Model thermal ini mengasumsikan single time-constant (IEC 60255-8) tanpa memperhitungkan perbedaan konstanta panas-dingin (k-factor cooling saat motor berhenti) atau kompensasi suhu ambient/RTD — relay motor protection komersial (Schneider, ABB, SEL, dll.) sering punya model lebih detail. Gunakan hasil ini sebagai verifikasi awal, bandingkan dengan manual relay yang sesungguhnya dipakai.
+              <b>Batas penggunaan:</b> grafik memakai persamaan trip-time yang dipublikasikan pada Appendix F SEL-749M, bukan emulasi firmware lengkap. Ramping adaptive trip threshold saat transisi start-to-run, kondisi %TCU aktual, RTD bias, cooling saat motor berhenti, toleransi relay/CT, waktu pemutus, dan elemen 50P harus diverifikasi terpisah sebelum setting diterapkan atau dikomisioningkan. Kurva 49T dihentikan di 12 × FLA karena persamaan publik F.10–F.17 dinyatakan untuk I ≤ 12 × FLA.
             </div>
           </div>
         </>

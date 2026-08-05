@@ -44,7 +44,7 @@ export default function KalkulatorPage({ params }) {
           )}
           <div className="nameplate">
             <span className="nameplate-dot" />
-            Disusun oleh <b>Aji Suryo Alam</b> · Panel Koordinasi Proteksi v1
+            Disusun oleh <b>Aji Suryo Alam</b> · Panel Koordinasi Proteksi v1.1 · SEL-749M
           </div>
         </main>
       </div>
