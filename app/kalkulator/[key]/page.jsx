@@ -3,6 +3,7 @@ import Sidebar from '../../../components/Sidebar';
 import EquipmentCalculator from '../../../components/EquipmentCalculator';
 import Coordination from '../../../components/Coordination';
 import GarduInduk from '../../../components/GarduInduk';
+import MotorGrading from '../../../components/MotorGrading';
 import { notFound } from 'next/navigation';
 
 export function generateStaticParams() {
@@ -28,6 +29,8 @@ export default function KalkulatorPage({ params }) {
             <Coordination />
           ) : params.key === 'gardu' ? (
             <GarduInduk />
+          ) : params.key === 'grading' ? (
+            <MotorGrading />
           ) : EQUIP[params.key].embedUrl ? (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <iframe
